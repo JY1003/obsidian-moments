@@ -2,6 +2,6 @@
   "id": "obsidian-moments",
   "name": "Moments",
   "version": "1.0.0",
-  "minAppVersion": "1.15.0",
+  "minAppVersion": "1.11.0",
   "description": "仿微信朋友圈的碎片化记录与照片瀑布流展示插件。"
 }

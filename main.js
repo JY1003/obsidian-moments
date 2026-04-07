@@ -27,6 +27,24 @@ __export(main_exports, {
 });
 module.exports = __toCommonJS(main_exports);
 var import_obsidian = require("obsidian");
+function parseMarkdownLink(value) {
+  const trimmed = value.trim();
+  const match = trimmed.match(/^\[([^\]]+)\]\((.+)\)$/);
+  if (!match) return null;
+  const [, rawLabel, rawUrl] = match;
+  const label = rawLabel.trim();
+  const url = rawUrl.trim();
+  if (!label || !url) return null;
+  try {
+    new URL(url);
+    return { label, url };
+  } catch (e) {
+    return null;
+  }
+}
+function serializeFrontmatterString(value) {
+  return JSON.stringify(value);
+}
 var DEFAULT_SETTINGS = {
   momentsPath: "Moments/\u8BB0\u5F55/",
   attachmentsPath: "Moments/Attachments/",
@@ -248,7 +266,7 @@ var ObsidianMomentsPlugin = class extends import_obsidian.Plugin {
     metaLeftEl.createDiv({ cls: "moments-time", text: item.createdAt || "\u672A\u77E5\u65F6\u95F4" });
     const locationEl = metaLeftEl.createDiv({ cls: "moments-location" });
     locationEl.createSpan({ cls: "moments-location-icon", text: "\u{1F4CD}" });
-    locationEl.appendText(item.location || "\u672A\u586B\u5199\u5730\u70B9");
+    this.renderLocationValue(locationEl, item.location);
     const actionsEl = metaRowEl.createDiv({ cls: "moments-actions" });
     const detailBtn = actionsEl.createEl("button", { text: "\u8BE6\u60C5" });
     const commentBtn = actionsEl.createEl("button", { text: "\u8BC4\u8BBA" });
@@ -361,6 +379,29 @@ ${commentItem}`;
     const parsed = Date.parse(value.replace(" ", "T"));
     return Number.isNaN(parsed) ? 0 : parsed;
   }
+  renderLocationValue(locationEl, location) {
+    const trimmedLocation = location.trim();
+    if (!trimmedLocation) {
+      locationEl.appendText("\u672A\u586B\u5199\u5730\u70B9");
+      return;
+    }
+    const markdownLink = parseMarkdownLink(trimmedLocation);
+    if (!markdownLink) {
+      locationEl.appendText(trimmedLocation);
+      return;
+    }
+    const locationLinkEl = locationEl.createEl("a", {
+      cls: "moments-location-link",
+      text: markdownLink.label,
+      href: markdownLink.url
+    });
+    locationLinkEl.target = "_blank";
+    locationLinkEl.rel = "noopener noreferrer";
+    locationLinkEl.addEventListener("click", (event) => {
+      event.preventDefault();
+      window.open(markdownLink.url, "_blank", "noopener,noreferrer");
+    });
+  }
   formatCommentTime(date) {
     const yyyy = date.getFullYear();
     const mm = this.pad(date.getMonth() + 1);
@@ -410,11 +451,22 @@ var CreateMomentModal = class extends import_obsidian.Modal {
         this.titleValue = value.trim();
       })
     );
-    new import_obsidian.Setting(contentEl).setName("\u5730\u70B9").addText(
-      (text) => text.setPlaceholder("\u8F93\u5165\u5730\u70B9").onChange((value) => {
+    const locationSetting = new import_obsidian.Setting(contentEl).setName("\u5730\u70B9");
+    locationSetting.controlEl.addClass("moments-location-control");
+    locationSetting.addText((text) => {
+      text.inputEl.addClass("moments-location-input");
+      text.setPlaceholder("\u8F93\u5165\u5730\u70B9").onChange((value) => {
         this.locationValue = value.trim();
-      })
-    );
+      });
+    });
+    if (import_obsidian.Platform.isIosApp) {
+      locationSetting.addButton((button) => {
+        button.setButtonText("\u5730\u56FE\u9009\u5740").onClick(() => {
+          this.openMapPicker();
+        });
+        button.buttonEl.addClass("moments-map-picker-button");
+      });
+    }
     const contentSetting = new import_obsidian.Setting(contentEl).setName("\u5185\u5BB9");
     const textarea = contentSetting.controlEl.createEl("textarea");
     textarea.rows = 5;
@@ -473,8 +525,8 @@ var CreateMomentModal = class extends import_obsidian.Modal {
       }
       const frontmatter = [
         "---",
-        `\u6807\u9898: ${this.titleValue || ""}`,
-        `\u5730\u70B9: ${this.locationValue || ""}`,
+        `\u6807\u9898: ${serializeFrontmatterString(this.titleValue || "")}`,
+        `\u5730\u70B9: ${serializeFrontmatterString(this.locationValue || "")}`,
         `\u521B\u5EFA\u65F6\u95F4: ${createdAt}`,
         `\u66F4\u65B0\u65F6\u95F4: ${createdAt}`,
         "---"
@@ -503,6 +555,26 @@ ${commentsSection}
       console.error(error);
       new import_obsidian.Notice("\u53D1\u5E03\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u8DEF\u5F84\u914D\u7F6E\u6216\u6587\u4EF6\u540D\u662F\u5426\u51B2\u7A81");
     }
+  }
+  openMapPicker() {
+    const mapUrl = this.getMapPickerUrl();
+    try {
+      window.open(mapUrl, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      console.error(error);
+      new import_obsidian.Notice("\u65E0\u6CD5\u6253\u5F00\u5730\u56FE\uFF0C\u8BF7\u68C0\u67E5\u7CFB\u7EDF\u662F\u5426\u5141\u8BB8\u6253\u5F00\u5916\u90E8\u94FE\u63A5");
+    }
+  }
+  getMapPickerUrl() {
+    const markdownLink = parseMarkdownLink(this.locationValue);
+    if (markdownLink) {
+      return markdownLink.url;
+    }
+    const query = this.locationValue.trim();
+    if (query) {
+      return `https://maps.apple.com/?q=${encodeURIComponent(query)}`;
+    }
+    return "https://maps.apple.com/";
   }
   cleanFolderPath(path) {
     return this.plugin.cleanFolderPath(path);

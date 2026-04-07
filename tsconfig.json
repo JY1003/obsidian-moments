@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "ES6",
+    "target": "ES2019",
     "module": "ESNext",
     "moduleResolution": "node",
     "strict": true,
@@ -10,7 +10,7 @@
     "strictNullChecks": true,
     "isolatedModules": true,
     "importHelpers": true,
-    "lib": ["DOM", "ES6", "ES7"],
+    "lib": ["DOM", "ES2019"],
     "types": ["obsidian"],
     "skipLibCheck": true
   },

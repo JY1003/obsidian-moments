@@ -2,6 +2,7 @@ import {
 	App,
 	Modal,
 	Notice,
+	Platform,
 	Plugin,
 	PluginSettingTab,
 	Setting,
@@ -28,6 +29,31 @@ interface MomentItem {
 	images: string[];
 }
 
+interface MarkdownLink {
+	label: string;
+	url: string;
+}
+
+function parseMarkdownLink(value: string): MarkdownLink | null {
+	const trimmed = value.trim();
+	const match = trimmed.match(/^\[([^\]]+)\]\((.+)\)$/);
+	if (!match) return null;
+	const [, rawLabel, rawUrl] = match;
+	const label = rawLabel.trim();
+	const url = rawUrl.trim();
+	if (!label || !url) return null;
+	try {
+		new URL(url);
+		return { label, url };
+	} catch {
+		return null;
+	}
+}
+
+function serializeFrontmatterString(value: string): string {
+	return JSON.stringify(value);
+}
+
 export const DEFAULT_SETTINGS: MomentsSettings = {
 	momentsPath: "Moments/记录/",
 	attachmentsPath: "Moments/Attachments/",
@@ -35,7 +61,7 @@ export const DEFAULT_SETTINGS: MomentsSettings = {
 };
 
 export default class ObsidianMomentsPlugin extends Plugin {
-	settings: MomentsSettings;
+	settings!: MomentsSettings;
 
 	async onload() {
 		await this.loadSettings();
@@ -278,7 +304,7 @@ export default class ObsidianMomentsPlugin extends Plugin {
 		metaLeftEl.createDiv({ cls: "moments-time", text: item.createdAt || "未知时间" });
 		const locationEl = metaLeftEl.createDiv({ cls: "moments-location" });
 		locationEl.createSpan({ cls: "moments-location-icon", text: "📍" });
-		locationEl.appendText(item.location || "未填写地点");
+		this.renderLocationValue(locationEl, item.location);
 		const actionsEl = metaRowEl.createDiv({ cls: "moments-actions" });
 		const detailBtn = actionsEl.createEl("button", { text: "详情" });
 		const commentBtn = actionsEl.createEl("button", { text: "评论" });
@@ -308,7 +334,7 @@ export default class ObsidianMomentsPlugin extends Plugin {
 							return `${normalized}\n\n## 评论区\n${commentItem}\n`;
 						}
 						const commentSectionRegex = /(^##\s*评论区\s*$)([\s\S]*?)$/m;
-						return normalized.replace(commentSectionRegex, (_m, heading: string, body: string) => {
+						return normalized.replace(commentSectionRegex, (_m: string, heading: string, body: string) => {
 							const sectionBody = body.trimEnd();
 							if (!sectionBody) {
 								return `${heading}\n${commentItem}`;
@@ -393,6 +419,32 @@ export default class ObsidianMomentsPlugin extends Plugin {
 		return Number.isNaN(parsed) ? 0 : parsed;
 	}
 
+	private renderLocationValue(locationEl: HTMLElement, location: string) {
+		const trimmedLocation = location.trim();
+		if (!trimmedLocation) {
+			locationEl.appendText("未填写地点");
+			return;
+		}
+
+		const markdownLink = parseMarkdownLink(trimmedLocation);
+		if (!markdownLink) {
+			locationEl.appendText(trimmedLocation);
+			return;
+		}
+
+		const locationLinkEl = locationEl.createEl("a", {
+			cls: "moments-location-link",
+			text: markdownLink.label,
+			href: markdownLink.url,
+		});
+		locationLinkEl.target = "_blank";
+		locationLinkEl.rel = "noopener noreferrer";
+		locationLinkEl.addEventListener("click", (event) => {
+			event.preventDefault();
+			window.open(markdownLink.url, "_blank", "noopener,noreferrer");
+		});
+	}
+
 	private formatCommentTime(date: Date): string {
 		const yyyy = date.getFullYear();
 		const mm = this.pad(date.getMonth() + 1);
@@ -458,13 +510,24 @@ export class CreateMomentModal extends Modal {
 				}),
 			);
 
-		new Setting(contentEl)
-			.setName("地点")
-			.addText((text) =>
+		const locationSetting = new Setting(contentEl).setName("地点");
+		locationSetting.controlEl.addClass("moments-location-control");
+		locationSetting
+			.addText((text) => {
+				text.inputEl.addClass("moments-location-input");
 				text.setPlaceholder("输入地点").onChange((value) => {
 					this.locationValue = value.trim();
-				}),
-			);
+				});
+			});
+
+		if (Platform.isIosApp) {
+			locationSetting.addButton((button) => {
+				button.setButtonText("地图选址").onClick(() => {
+					this.openMapPicker();
+				});
+				button.buttonEl.addClass("moments-map-picker-button");
+			});
+		}
 
 		const contentSetting = new Setting(contentEl).setName("内容");
 		const textarea = contentSetting.controlEl.createEl("textarea");
@@ -531,8 +594,8 @@ export class CreateMomentModal extends Modal {
 
 			const frontmatter = [
 				"---",
-				`标题: ${this.titleValue || ""}`,
-				`地点: ${this.locationValue || ""}`,
+				`标题: ${serializeFrontmatterString(this.titleValue || "")}`,
+				`地点: ${serializeFrontmatterString(this.locationValue || "")}`,
 				`创建时间: ${createdAt}`,
 				`更新时间: ${createdAt}`,
 				"---",
@@ -555,6 +618,30 @@ export class CreateMomentModal extends Modal {
 			console.error(error);
 			new Notice("发布失败，请检查路径配置或文件名是否冲突");
 		}
+	}
+
+	private openMapPicker() {
+		const mapUrl = this.getMapPickerUrl();
+		try {
+			window.open(mapUrl, "_blank", "noopener,noreferrer");
+		} catch (error) {
+			console.error(error);
+			new Notice("无法打开地图，请检查系统是否允许打开外部链接");
+		}
+	}
+
+	private getMapPickerUrl(): string {
+		const markdownLink = parseMarkdownLink(this.locationValue);
+		if (markdownLink) {
+			return markdownLink.url;
+		}
+
+		const query = this.locationValue.trim();
+		if (query) {
+			return `https://maps.apple.com/?q=${encodeURIComponent(query)}`;
+		}
+
+		return "https://maps.apple.com/";
 	}
 
 	private cleanFolderPath(path: string): string {
